@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 from datetime import datetime
 
 # --- Configuração da Página ---
-st.set_page_config(page_title="Dashboard Financeiro", layout="wide")
+st.set_page_config(page_title="Dashboard Financeiro", layout="wide", menu_items=None)
 
 # --- Funções de Carregamento e Tratamento ---
 @st.cache_data
