@@ -7,6 +7,16 @@ from datetime import datetime
 # --- Configuração da Página ---
 st.set_page_config(page_title="Dashboard Financeiro", layout="wide", menu_items=None)
 
+# --- Ocultar itens padrão do Streamlit (Menu, Footer, Header) ---
+hide_st_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_st_style, unsafe_allow_html=True)
+
 # --- Funções de Carregamento e Tratamento ---
 @st.cache_data
 def carregar_dados():
