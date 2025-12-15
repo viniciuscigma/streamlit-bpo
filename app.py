@@ -42,12 +42,11 @@ st.markdown("---")
 def carregar_dados(file_receber, file_pagar, file_mov, file_inad):
     df_receber, df_pagar, df_mov, df_inad = None, None, None, None
 
-    # Função auxiliar para tratar datas (CORREÇÃO AQUI: dayfirst=True)
+    # Função auxiliar para tratar datas (dayfirst=True para formato brasileiro)
     def tratar_datas(df, colunas):
         for col in colunas:
             if col in df.columns:
-                # dayfirst=True garante que 05/03 seja 5 de Março, não 3 de Maio
-                df[col] = pd.to_datetime(df[col], dayfirst=True, errors='coerce') 
+                df[col] = pd.to_datetime(df[col], dayfirst=True, errors='coerce')
         return df
 
     try:
@@ -61,7 +60,13 @@ def carregar_dados(file_receber, file_pagar, file_mov, file_inad):
                 pass
         
         if df_mov is not None:
+            # --- NOVO FILTRO: Remover Transferências ---
+            # Remove linhas onde a coluna 'Transferência' é marcada como 'Sim'
+            if 'Transferência' in df_mov.columns:
+                df_mov = df_mov[df_mov['Transferência'] != 'Sim'] 
+            
             df_mov = tratar_datas(df_mov, ['Data Realizado', 'Vencimento', 'Competência'])
+            
             # Tratamento de valores numéricos
             cols_valor = ['Valor Realizado', 'Valor (R$)']
             for col in cols_valor:
@@ -113,7 +118,7 @@ if df_mov is not None:
     anos_disponiveis = sorted(df_mov['Data Realizado'].dt.year.dropna().unique().astype(int))
     
     if not anos_disponiveis:
-        st.warning("Não há dados de datas válidas no arquivo de movimentações.")
+        st.warning("Não há dados de datas válidas no arquivo de movimentações (após filtros).")
         st.stop()
 
     idx_ano = len(anos_disponiveis)-1 if anos_disponiveis else 0
@@ -124,7 +129,7 @@ if df_mov is not None:
     with col_titulo:
         st.title(f"📊 Dashboard Financeiro - {ano_selecionado}")
     
-    # --- Filtragem dos Dados ---
+    # --- Filtragem dos Dados por Ano e Tipo ---
     df_rec_ano = df_mov[(df_mov['Tipo'] == 'Receita') & (df_mov['Data Realizado'].dt.year == ano_selecionado)].copy()
     df_pag_ano = df_mov[(df_mov['Tipo'] == 'Despesa') & (df_mov['Data Realizado'].dt.year == ano_selecionado)].copy()
 
@@ -179,6 +184,7 @@ if df_mov is not None:
     # --- 3. Evolução do Caixa (Gráfico Combinado) ---
     st.subheader("Fluxo de Caixa (Entradas vs Saídas vs Saldo)")
     
+    # Preparar dados mensais
     df_rec_ano['Mes'] = df_rec_ano['Data Realizado'].dt.to_period('M')
     df_pag_ano['Mes'] = df_pag_ano['Data Realizado'].dt.to_period('M')
 
@@ -240,7 +246,7 @@ if df_mov is not None:
         st.subheader("Distribuição de Gastos")
         if not df_pag_ano.empty:
             df_cat_pag = df_pag_ano.groupby('Categoria')['Valor Realizado'].sum().reset_index()
-            # Agrupar categorias pequenas
+            # Agrupar categorias pequenas para limpar o gráfico
             total_pag = df_cat_pag['Valor Realizado'].sum()
             if total_pag > 0:
                 limit = total_pag * 0.02 
@@ -253,6 +259,7 @@ if df_mov is not None:
     # --- 5. Análise Vertical ---
     st.subheader("Análise Vertical: Estrutura de Custos")
     
+    # Filtros por palavras-chave comuns
     impostos = df_pag_ano[df_pag_ano['Categoria'].str.contains('Imposto|DAS|DARF|ISS|PIS|COFINS|Tributo', case=False, na=False)]['Valor Realizado'].sum()
     folha = df_pag_ano[df_pag_ano['Categoria'].str.contains('Folha|Salário|Pró-labore|Pessoal|INSS|FGTS', case=False, na=False)]['Valor Realizado'].sum()
     terceiros = df_pag_ano[df_pag_ano['Categoria'].str.contains('Terceir|Serviço|PJ|Consultoria', case=False, na=False)]['Valor Realizado'].sum()
