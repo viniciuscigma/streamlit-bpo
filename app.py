@@ -42,12 +42,21 @@ st.markdown("---")
 def carregar_dados(file_receber, file_pagar, file_mov, file_inad):
     df_receber, df_pagar, df_mov, df_inad = None, None, None, None
 
-    # Função auxiliar para tratar datas (dayfirst=True para formato brasileiro)
+    # Função auxiliar para tratar datas
     def tratar_datas(df, colunas):
         for col in colunas:
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], dayfirst=True, errors='coerce')
         return df
+    
+    # Função auxiliar INTELIGENTE para tratar valores
+    def tratar_valor(series):
+        # Se a coluna já for numérica (float/int), não faz nada (evita o bug de multiplicar por 100)
+        if pd.api.types.is_numeric_dtype(series):
+            return series.fillna(0)
+        
+        # Se for texto (object), aplica a correção do formato brasileiro (1.000,00 -> 1000.00)
+        return pd.to_numeric(series.astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce').fillna(0)
 
     try:
         # Carregar Movimentações (Principal)
@@ -60,8 +69,7 @@ def carregar_dados(file_receber, file_pagar, file_mov, file_inad):
                 pass
         
         if df_mov is not None:
-            # --- NOVO FILTRO: Remover Transferências ---
-            # Remove linhas onde a coluna 'Transferência' é marcada como 'Sim'
+            # Filtro: Remover Transferências
             if 'Transferência' in df_mov.columns:
                 df_mov = df_mov[df_mov['Transferência'] != 'Sim'] 
             
@@ -71,10 +79,7 @@ def carregar_dados(file_receber, file_pagar, file_mov, file_inad):
             cols_valor = ['Valor Realizado', 'Valor (R$)']
             for col in cols_valor:
                 if col in df_mov.columns:
-                     if df_mov[col].dtype == 'object':
-                        df_mov[col] = pd.to_numeric(df_mov[col].str.replace(',', '.'), errors='coerce').fillna(0)
-                     else:
-                        df_mov[col] = pd.to_numeric(df_mov[col], errors='coerce').fillna(0)
+                     df_mov[col] = tratar_valor(df_mov[col])
 
         # Carregar Inadimplência
         if file_inad is not None:
@@ -88,10 +93,7 @@ def carregar_dados(file_receber, file_pagar, file_mov, file_inad):
         if df_inad is not None:
             df_inad = tratar_datas(df_inad, ['Últ. Pagamento'])
             if 'Valor (R$)' in df_inad.columns:
-                if df_inad['Valor (R$)'].dtype == 'object':
-                    df_inad['Valor (R$)'] = pd.to_numeric(df_inad['Valor (R$)'].str.replace(',', '.'), errors='coerce').fillna(0)
-                else:
-                    df_inad['Valor (R$)'] = pd.to_numeric(df_inad['Valor (R$)'], errors='coerce').fillna(0)
+                df_inad['Valor (R$)'] = tratar_valor(df_inad['Valor (R$)'])
 
         # Carregar Contas a Receber (Opcional)
         if file_receber is not None:
@@ -129,9 +131,17 @@ if df_mov is not None:
     with col_titulo:
         st.title(f"📊 Dashboard Financeiro - {ano_selecionado}")
     
-    # --- Filtragem dos Dados por Ano e Tipo ---
+    # --- Filtragem dos Dados por Ano ---
     df_rec_ano = df_mov[(df_mov['Tipo'] == 'Receita') & (df_mov['Data Realizado'].dt.year == ano_selecionado)].copy()
     df_pag_ano = df_mov[(df_mov['Tipo'] == 'Despesa') & (df_mov['Data Realizado'].dt.year == ano_selecionado)].copy()
+    
+    # Filtrar Inadimplência pelo Ano Selecionado
+    valor_inadimplencia_ano = 0.0
+    if df_inad is not None:
+        df_inad_ano = df_inad[df_inad['Últ. Pagamento'].dt.year == ano_selecionado]
+        valor_inadimplencia_ano = df_inad_ano['Valor (R$)'].sum()
+    else:
+        df_inad_ano = pd.DataFrame()
 
     st.markdown("---") 
 
@@ -139,14 +149,12 @@ if df_mov is not None:
     faturamento_total = df_rec_ano['Valor Realizado'].sum()
     gastos_totais = df_pag_ano['Valor Realizado'].sum()
     resultado = faturamento_total - gastos_totais
-    
-    inadimplencia_total = df_inad['Valor (R$)'].sum() if df_inad is not None else 0.0
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Faturamento (Ano)", f"R$ {faturamento_total:,.2f}")
     col2.metric("Gastos Totais (Ano)", f"R$ {gastos_totais:,.2f}")
     col3.metric("Resultado (Ano)", f"R$ {resultado:,.2f}", delta_color="normal")
-    col4.metric("Inadimplência (Total)", f"R$ {inadimplencia_total:,.2f}", delta_color="inverse")
+    col4.metric("Inadimplência (Ano)", f"R$ {valor_inadimplencia_ano:,.2f}", delta_color="inverse")
 
     st.markdown("---")
 
@@ -168,8 +176,6 @@ if df_mov is not None:
     with col_evo2:
         st.subheader("Evolução da Inadimplência")
         if df_inad is not None:
-            df_inad_ano = df_inad[df_inad['Últ. Pagamento'].dt.year == ano_selecionado]
-            
             if not df_inad_ano.empty:
                 df_inad_mes = df_inad_ano.groupby(df_inad_ano['Últ. Pagamento'].dt.to_period('M'))['Valor (R$)'].sum().reset_index()
                 df_inad_mes['Últ. Pagamento'] = df_inad_mes['Últ. Pagamento'].dt.to_timestamp()
@@ -177,14 +183,13 @@ if df_mov is not None:
                 fig_inad = px.line(df_inad_mes, x='Mes', y='Valor (R$)', markers=True, color_discrete_sequence=['red'])
                 st.plotly_chart(fig_inad, use_container_width=True)
             else:
-                st.info("Sem inadimplência registrada neste ano.")
+                st.info(f"Sem inadimplência registrada para datas em {ano_selecionado}.")
         else:
             st.warning("Arquivo de Inadimplência não carregado.")
 
     # --- 3. Evolução do Caixa (Gráfico Combinado) ---
     st.subheader("Fluxo de Caixa (Entradas vs Saídas vs Saldo)")
     
-    # Preparar dados mensais
     df_rec_ano['Mes'] = df_rec_ano['Data Realizado'].dt.to_period('M')
     df_pag_ano['Mes'] = df_pag_ano['Data Realizado'].dt.to_period('M')
 
@@ -246,7 +251,7 @@ if df_mov is not None:
         st.subheader("Distribuição de Gastos")
         if not df_pag_ano.empty:
             df_cat_pag = df_pag_ano.groupby('Categoria')['Valor Realizado'].sum().reset_index()
-            # Agrupar categorias pequenas para limpar o gráfico
+            # Agrupar categorias pequenas
             total_pag = df_cat_pag['Valor Realizado'].sum()
             if total_pag > 0:
                 limit = total_pag * 0.02 
@@ -259,7 +264,6 @@ if df_mov is not None:
     # --- 5. Análise Vertical ---
     st.subheader("Análise Vertical: Estrutura de Custos")
     
-    # Filtros por palavras-chave comuns
     impostos = df_pag_ano[df_pag_ano['Categoria'].str.contains('Imposto|DAS|DARF|ISS|PIS|COFINS|Tributo', case=False, na=False)]['Valor Realizado'].sum()
     folha = df_pag_ano[df_pag_ano['Categoria'].str.contains('Folha|Salário|Pró-labore|Pessoal|INSS|FGTS', case=False, na=False)]['Valor Realizado'].sum()
     terceiros = df_pag_ano[df_pag_ano['Categoria'].str.contains('Terceir|Serviço|PJ|Consultoria', case=False, na=False)]['Valor Realizado'].sum()
